@@ -210,7 +210,7 @@
         </div>
       </div>
       <div class="formula">Health Score = 60% Hygiene (completeness, dedup, organization, suppression tagging) &middot; 40% Activation (plans active, tasks on time)</div>
-      <footer><span>crmrefresh.org</span><span id="r_foot">Keep It Clean</span></footer>
+      <footer><span>keepitclean@crmrefresh.org</span><span id="r_foot">Keep It Clean</span></footer>
     </div>
   </div>
 </div>
@@ -301,8 +301,8 @@
       : `<div class="empty">Nothing major dragging your score — your CRM is in excellent shape.</div>`;
   }
   function filenameBase(){
-    const safe=s=>(s||'').replace(/[^a-z0-9]+/gi,'_');
-    return safe($('cname').value||'client')+'_'+safe($('cmonth').value)+safe($('cyear').value)+'_HealthReport';
+    const safe=s=>(s||'').replace(/[^a-z0-9]+/g,' ').trim();
+    return safe($('cname').value||'Client')+' - CRM Health Report - '+safe($('cyear').value)+' '+safe($('cmonth').value);
   }
   async function exportImage(){
     const page=document.querySelector('.page');
@@ -328,7 +328,7 @@
       const x=(btnRect.left-pageRect.left)*scaleX;
       const y=(btnRect.top-pageRect.top)*scaleY;
       const w=btnRect.width*scaleX, h=btnRect.height*scaleY;
-      pdf.link(x,y,w,h,{url:bookUrl});
+      pdf.link(x,y+h,w,-h,{url:bookUrl});
     }
     pdf.save(filenameBase()+'.pdf');
   }
