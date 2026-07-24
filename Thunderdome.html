@@ -302,7 +302,7 @@
   }
   function filenameBase(){
     const safe=s=>(s||'').replace(/[^a-z0-9]+/gi,' ').trim();
-    return safe($('cname').value||'Client')+' - CRM Health Report - '+safe($('cyear').value)+' '+safe($('cmonth').value);
+    return safe($('cname').value||'Client')+' - CRM Health Score ('+safe($('cmonth').value)+' '+safe($('cyear').value)+')';
   }
   async function exportImage(){
     const page=document.querySelector('.page');
