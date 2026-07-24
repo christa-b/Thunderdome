@@ -91,6 +91,16 @@
   <div class="left">
     <h2>CRM Health Report Builder</h2>
     <div class="sub">Enter the month&rsquo;s counts. Everything updates live.</div>
+    <div class="grp">Google Sheet</div>
+    <div class="f" style="flex-direction:column;align-items:stretch;gap:6px">
+      <input type="text" id="sheeturl" placeholder="Paste Google Sheet link&hellip;" style="width:100%">
+      <button class="btn" style="width:100%" onclick="loadSheet()">Load Sheet</button>
+      <div id="sheetrowwrap" style="display:none;margin-top:2px">
+        <select id="rowpicker" style="width:100%;font-family:Arial;font-size:12px;padding:5px 7px;border:1px solid var(--line);border-radius:6px"></select>
+        <button class="btn" style="width:100%;margin-top:6px" onclick="applySheetRow()">Load selected row</button>
+      </div>
+      <div id="sheetmsg" style="font-size:10.5px;color:var(--muted)">Sheet must be shared as &ldquo;Anyone with the link can view.&rdquo;</div>
+    </div>
     <div class="grp">Client</div>
     <div class="f"><label>Client name</label><input type="text" id="cname" value="Sarah Mitchell"></div>
     <div class="f"><label>Month</label><input type="text" id="cmonth" value="July"></div>
@@ -104,7 +114,8 @@
     <div class="f"><label># of duplicates</label><input type="number" id="dups" value="51"></div>
     <div class="f"><label># pending review</label><input type="number" id="pending" value="23"></div>
     <div class="f"><label># of ungrouped</label><input type="number" id="ungrp" value="141"></div>
-    <div class="f"><label>Und/Unsub tagged</label><input type="number" id="tagged" value="88"></div>
+    <div class="f"><label>Undeliverable tagged</label><input type="number" id="tagged_undel" value="50"></div>
+    <div class="f"><label>Unsubscribed tagged</label><input type="number" id="tagged_unsub" value="38"></div>
     <div class="f"><label>Und/Unsub NOT tagged</label><input type="number" id="nottag" value="12"></div>
     <div class="grp">Activation <span>40%</span></div>
     <div class="f"><label>Action plans set up</label><input type="number" id="apset" value="9"></div>
@@ -121,7 +132,8 @@
     <div class="f"><label>Ungrouped organized</label><input type="number" id="ungrporg" value="63"></div>
     <div class="f"><label>Past clients updated</label><input type="number" id="enriched" value="112"></div>
     <div class="f"><label>Contacts with updated info</label><input type="number" id="infoupdated" value="0"></div>
-    <div class="f"><label>Und/Unsub newly tagged</label><input type="number" id="newtag" value="34"></div>
+    <div class="f"><label>Undeliverable newly tagged</label><input type="number" id="newtag_undel" value="20"></div>
+    <div class="f"><label>Unsubscribed newly tagged</label><input type="number" id="newtag_unsub" value="14"></div>
     <div class="f"><label>Pending review organized</label><input type="number" id="pendorg" value="0"></div>
     <div class="grp">Trend</div>
     <div class="f"><label>Last month&rsquo;s score <span style="color:#9AA0AB">(blank=1st)</span></label><input type="number" id="lastscore" value="79"></div>
@@ -212,7 +224,7 @@
     const completeness=(cEmail+cPhone+cAddr)/3;
     const dedup=rate(total-n('dups'),total);
     const org=rate(total-n('ungrp'),total);
-    const supDen=n('tagged')+n('nottag'); const suppression=supDen>0?rate(n('tagged'),supDen):100;
+    const supDen=(n('tagged_undel')+n('tagged_unsub'))+n('nottag'); const suppression=supDen>0?rate(n('tagged_undel')+n('tagged_unsub'),supDen):100;
     const H=(completeness+dedup+org+suppression)/4;
     const planAct=n('apset')>0?rate(n('apact'),n('apset')):0;
     const onTime=n('tasks')>0?rate(n('tasks')-n('overdue'),n('tasks')):100;
@@ -234,7 +246,7 @@
     $('t_merged').textContent=n('dupmerged').toLocaleString();
     $('t_ungrp').textContent=n('ungrporg').toLocaleString();
     $('t_enrich').textContent=(n('enriched')+n('infoupdated')).toLocaleString();
-    $('t_tag').textContent=n('newtag').toLocaleString();
+    $('t_tag').textContent=(n('newtag_undel')+n('newtag_unsub')).toLocaleString();
     $('t_pendorg').textContent=n('pendorg').toLocaleString();
     const notesVal=$('notes').value.trim();
     if(notesVal){$('notessec').style.display='';$('notesbox').style.display='';$('notesbox').textContent=notesVal;}
@@ -309,10 +321,100 @@
     pdf.addImage(imgData,'PNG',0,0,8.5,11);
     pdf.save(filenameBase()+'.pdf');
   }
+  // ---- Google Sheet import ----
+  const HEADER_MAP={
+    'client name':'cname','month':'cmonth','year':'cyear','booking link':'cbook',
+    'total contacts':'total','missing email':'missemail','missing phone':'missphone','missing address':'missaddr',
+    '# of duplicates':'dups','# pending review':'pending','# of ungrouped':'ungrp',
+    'undeliverable tagged':'tagged_undel','unsubscribed tagged':'tagged_unsub','und/unsub not tagged':'nottag',
+    'action plans set up':'apset','action plans active':'apact','total open tasks':'tasks','overdue tasks':'overdue',
+    'total past buyers':'pbtotal','past buyers missing email':'pbmissemail',
+    'total active clients':'actotal','active clients no recent activity':'acstale',
+    'duplicates merged':'dupmerged','ungrouped organized':'ungrporg',
+    'past clients updated':'enriched','contacts with updated info':'infoupdated',
+    'undeliverable newly tagged':'newtag_undel','unsubscribed newly tagged':'newtag_unsub','pending review organized':'pendorg',
+    "last month's score":'lastscore','notes':'notes',
+    'records imported':'impcount','names imported':'imp_names','phone numbers imported':'imp_phones',
+    'emails imported':'imp_emails','addresses imported':'imp_addresses',
+    'hygiene weight %':'wh','activation weight %':'wa','helping/hurting cutoff %':'cutoff'
+  };
+  let sheetRows=[];
+  function buildCsvUrl(url){
+    const gidMatch=url.match(/[?&#]gid=([0-9]+)/);
+    const gid=gidMatch?gidMatch[1]:'0';
+    const pubMatch=url.match(/\/d\/e\/([a-zA-Z0-9-_]+)/);
+    if(pubMatch) return `https://docs.google.com/spreadsheets/d/e/${pubMatch[1]}/pub?gid=${gid}&single=true&output=csv`;
+    const idMatch=url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    if(idMatch) return `https://docs.google.com/spreadsheets/d/${idMatch[1]}/export?format=csv&gid=${gid}`;
+    return null;
+  }
+  function parseCSV(text){
+    const rows=[]; let i=0, field='', row=[], inQuotes=false;
+    const pushField=()=>{row.push(field);field='';};
+    const pushRow=()=>{rows.push(row);row=[];};
+    while(i<text.length){
+      const c=text[i];
+      if(inQuotes){
+        if(c==='"'){ if(text[i+1]==='"'){field+='"';i+=2;} else {inQuotes=false;i++;} }
+        else{field+=c;i++;}
+      } else {
+        if(c==='"'){inQuotes=true;i++;}
+        else if(c===','){pushField();i++;}
+        else if(c==='\r'){i++;}
+        else if(c==='\n'){pushField();pushRow();i++;}
+        else{field+=c;i++;}
+      }
+    }
+    if(field.length||row.length){pushField();pushRow();}
+    if(!rows.length) return [];
+    const headers=rows[0].map(h=>h.trim());
+    return rows.slice(1).filter(r=>r.some(v=>v!==''&&v!==undefined)).map(r=>{
+      const obj={}; headers.forEach((h,idx)=>obj[h]=r[idx]!==undefined?r[idx]:''); return obj;
+    });
+  }
+  async function loadSheet(){
+    const url=$('sheeturl').value.trim();
+    const msg=$('sheetmsg');
+    if(!url){msg.textContent='Paste a Google Sheet link first.';return;}
+    const csvUrl=buildCsvUrl(url);
+    if(!csvUrl){msg.textContent='Could not read that link — make sure it\'s a Google Sheets URL.';return;}
+    msg.textContent='Loading\u2026';
+    try{
+      const res=await fetch(csvUrl);
+      if(!res.ok) throw new Error('fetch failed');
+      const text=await res.text();
+      const rows=parseCSV(text);
+      if(!rows.length){msg.textContent='No rows found. Check the sheet has data and is shared as "Anyone with the link can view."';return;}
+      sheetRows=rows;
+      const sel=$('rowpicker'); sel.innerHTML='';
+      rows.forEach((r,i)=>{
+        const label=(r['Client name']||'Row '+(i+1))+' — '+(r['Month']||'')+' '+(r['Year']||'');
+        const opt=document.createElement('option'); opt.value=i; opt.textContent=label; sel.appendChild(opt);
+      });
+      $('sheetrowwrap').style.display='';
+      msg.textContent=rows.length+' row(s) found — pick one below.';
+    }catch(err){
+      msg.textContent='Could not load that sheet. Confirm sharing is set to "Anyone with the link can view," or try a Publish-to-web CSV link instead.';
+    }
+  }
+  function applySheetRow(){
+    const i=parseInt($('rowpicker').value,10);
+    if(sheetRows[i]) applyRow(sheetRows[i]);
+    $('sheetmsg').textContent='Loaded: '+$('rowpicker').selectedOptions[0].textContent;
+  }
+  function applyRow(row){
+    const normalized={};
+    Object.keys(row).forEach(k=>normalized[k.trim().toLowerCase()]=row[k]);
+    Object.keys(HEADER_MAP).forEach(h=>{
+      const id=HEADER_MAP[h];
+      if(normalized[h]!==undefined && normalized[h]!=='' && $(id)) $(id).value=normalized[h];
+    });
+    recompute();
+  }
   function loadSample(){
     const v={cname:'Sarah Mitchell',cmonth:'July',cyear:'2026',cbook:'https://crmrefresh.org/KIC-Session',total:1284,missemail:116,missphone:77,
-      missaddr:205,dups:51,ungrp:141,tagged:88,nottag:12,pending:23,apset:9,apact:7,tasks:120,overdue:18,
-      dupmerged:47,ungrporg:63,enriched:112,infoupdated:26,newtag:34,pendorg:9,lastscore:79,wh:60,wa:40,cutoff:85,
+      missaddr:205,dups:51,ungrp:141,tagged_undel:50,tagged_unsub:38,nottag:12,pending:23,apset:9,apact:7,tasks:120,overdue:18,
+      dupmerged:47,ungrporg:63,enriched:112,infoupdated:26,newtag_undel:20,newtag_unsub:14,pendorg:9,lastscore:79,wh:60,wa:40,cutoff:85,
       pbtotal:340,pbmissemail:28,actotal:95,acstale:11,impcount:64,
       notes:'Great progress this month, Sarah! Once we clear the remaining duplicates and missing emails, your score should climb above 90.'};
     for(const k in v)$(k).value=v[k];
