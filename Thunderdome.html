@@ -319,6 +319,17 @@
     const {jsPDF}=window.jspdf;
     const pdf=new jsPDF({unit:'in',format:'letter'});
     pdf.addImage(imgData,'PNG',0,0,8.5,11);
+    // Overlay a real clickable link where the booking button sits on the page
+    const bookEl=$('r_book'), bookUrl=$('cbook').value;
+    if(bookEl && bookUrl){
+      const pageRect=page.getBoundingClientRect();
+      const btnRect=bookEl.getBoundingClientRect();
+      const scaleX=8.5/pageRect.width, scaleY=11/pageRect.height;
+      const x=(btnRect.left-pageRect.left)*scaleX;
+      const y=(btnRect.top-pageRect.top)*scaleY;
+      const w=btnRect.width*scaleX, h=btnRect.height*scaleY;
+      pdf.link(x,y,w,h,{url:bookUrl});
+    }
     pdf.save(filenameBase()+'.pdf');
   }
   // ---- Google Sheet import ----
